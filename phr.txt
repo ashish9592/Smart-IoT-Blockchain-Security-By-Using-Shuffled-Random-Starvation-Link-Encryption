@@ -1,0 +1,6 @@
+id: aa4
+name: Ashish Doe
+age: 40
+diseaseEncrypted: suffering from fever
+diagnosisEncrypted: blood test, oxygen level
+labResultsEncrypted: positive

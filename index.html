@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SecurePHR File Upload - All Tx Export</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    #txnDetails { margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f1f1f1; }
+    .detail-row { margin: 6px 0; }
+    .detail-label { font-weight: bold; width: 150px; display: inline-block; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h2>Upload a PHR Record (.txt)</h2>
+  <input type="file" id="fileInput" accept=".txt" />
+  <button onclick="uploadPHR()">Upload and Submit</button>
+
+  <br><br>
+  <label for="phrIdInput">Enter PHR ID:</label>
+  <input type="text" id="phrIdInput" placeholder="e.g., phr1234" />
+  <button onclick="encryptPHR()">Encrypt by ID</button>
+  <button onclick="decryptPHR()">Decrypt by ID</button>
+
+  <div id="txnDetails" style="display: none;">
+    <h3>Last Transaction Details</h3>
+    <div class="detail-row"><span class="detail-label">Transaction Hash:</span> <span id="txHash"></span></div>
+    <div class="detail-row"><span class="detail-label">Block:</span> <span id="txBlock"></span></div>
+    <div class="detail-row"><span class="detail-label">Timestamp:</span> <span id="txTimestamp"></span></div>
+    <div class="detail-row"><span class="detail-label">Gas Used:</span> <span id="txGasUsed"></span></div>
+    <div class="detail-row"><span class="detail-label">Gas Price:</span> <span id="txGasPrice"></span></div>
+    <button onclick="exportToExcel()">Download This Tx as Excel</button>
+  </div>
+
+  <br><br>
+  <button onclick="exportAllToExcel()">Export ALL Transactions to Excel</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.8.2/dist/web3.min.js"></script>
+  <script>
+    const contractAddress = " "; // Replace with your contract 
+    const contractABI = []; // Add ABI here
+
+    let web3;
+    let contract;
+    let allTransactions = []; // Store all tx here
+
+    async function init() {
+      if (!window.ethereum) {
+        alert("Please install MetaMask.");
+        return;
+      }
+      web3 = new Web3(window.ethereum);
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      contract = new web3.eth.Contract(contractABI, contractAddress);
+    }
+
+    async function uploadPHR() {
+      await init();
+      const fileInput = document.getElementById("fileInput");
+      if (!fileInput.files.length) {
+        alert("Please select a file.");
+        return;
+      }
+      const file = fileInput.files[0];
+      const text = await file.text();
+      const lines = text.split("\n").filter(line => line.trim() !== "");
+      const phr = {};
+      lines.forEach(line => {
+        const parts = line.split(":");
+        if (parts.length >= 2) {
+          const key = parts[0].trim();
+          const value = parts.slice(1).join(":").trim();
+          phr[key] = value;
+        }
+      });
+
+      const accounts = await web3.eth.getAccounts();
+      const user = accounts[0];
+      try {
+        const gasPrice = await web3.eth.getGasPrice();
+        const tx = await contract.methods.storePHR(
+          phr["id"], phr["name"], phr["age"],
+          phr["diseaseEncrypted"], phr["diagnosisEncrypted"], phr["labResultsEncrypted"]
+        ).send({ from: user });
+
+        const block = await web3.eth.getBlock(tx.blockNumber);
+        const time = new Date(block.timestamp * 1000).toLocaleString();
+
+        updateTxnDetails(tx, block, gasPrice);
+        storeTransaction(tx, block, gasPrice);
+
+        console.log("PHR stored successfully.");
+      } catch (error) {
+        console.error("Upload error:", error);
+        alert("Upload failed: " + (error.message || "Unknown error"));
+      }
+    }
+
+    async function encryptPHR() {
+      await init();
+      const id = document.getElementById("phrIdInput").value.trim();
+      if (!id) return alert("Enter a PHR ID first.");
+      try {
+        const accounts = await web3.eth.getAccounts();
+        const gasPrice = await web3.eth.getGasPrice();
+        const tx = await contract.methods.encryptSensitiveById(id).send({ from: accounts[0] });
+        const block = await web3.eth.getBlock(tx.blockNumber);
+        const time = new Date(block.timestamp * 1000).toLocaleString();
+
+        updateTxnDetails(tx, block, gasPrice);
+        storeTransaction(tx, block, gasPrice);
+
+        alert("Encryption done for ID: " + id);
+      } catch (err) {
+        console.error(err);
+        alert("Encryption failed: " + err.message);
+      }
+    }
+
+    async function decryptPHR() {
+      await init();
+      const id = document.getElementById("phrIdInput").value.trim();
+      if (!id) return alert("Enter a PHR ID first.");
+      try {
+        const accounts = await web3.eth.getAccounts();
+        const gasPrice = await web3.eth.getGasPrice();
+        const tx = await contract.methods.decryptSensitiveById(id).send({ from: accounts[0] });
+        const block = await web3.eth.getBlock(tx.blockNumber);
+        const time = new Date(block.timestamp * 1000).toLocaleString();
+
+        updateTxnDetails(tx, block, gasPrice);
+        storeTransaction(tx, block, gasPrice);
+
+        alert("Decryption done for ID: " + id);
+      } catch (err) {
+        console.error(err);
+        alert("Decryption failed: " + err.message);
+      }
+    }
+
+    function updateTxnDetails(tx, block, gasPrice) {
+      document.getElementById("txnDetails").style.display = "block";
+      document.getElementById("txHash").textContent = tx.transactionHash;
+      document.getElementById("txBlock").textContent = tx.blockNumber;
+      document.getElementById("txGasUsed").textContent = tx.gasUsed;
+      document.getElementById("txGasPrice").textContent = web3.utils.fromWei(gasPrice, 'gwei') + " Gwei";
+      document.getElementById("txTimestamp").textContent = new Date(block.timestamp * 1000).toLocaleString();
+    }
+
+    function storeTransaction(tx, block, gasPrice) {
+      allTransactions.push({
+        txHash: tx.transactionHash,
+        blockNumber: tx.blockNumber,
+        blockTimestamp: new Date(block.timestamp * 1000).toLocaleString(),
+        gasUsed: tx.gasUsed,
+        gasPrice: web3.utils.fromWei(gasPrice, 'gwei') + " Gwei",
+        blockSize: block.size || "-",  // block.size is optional in many chains
+        txCountInBlock: block.transactions.length
+      });
+    }
+
+    function exportToExcel() {
+      const data = [
+        ["Transaction Hash", document.getElementById("txHash").textContent],
+        ["Block", document.getElementById("txBlock").textContent],
+        ["Timestamp", document.getElementById("txTimestamp").textContent],
+        ["Gas Used", document.getElementById("txGasUsed").textContent],
+        ["Gas Price", document.getElementById("txGasPrice").textContent]
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "TransactionDetails");
+      XLSX.writeFile(wb, "Transaction_Details.xlsx");
+    }
+
+    function exportAllToExcel() {
+      const header = ["Tx Hash", "Block Number", "Timestamp", "Gas Used", "Gas Price", "Block Size", "Tx Count in Block"];
+      const rows = allTransactions.map(tx => [
+        tx.txHash, tx.blockNumber, tx.blockTimestamp, tx.gasUsed, tx.gasPrice, tx.blockSize, tx.txCountInBlock
+      ]);
+
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "AllTransactions");
+      XLSX.writeFile(wb, "All_Transactions.xlsx");
+    }
+  </script>
+</body>
+</html>
